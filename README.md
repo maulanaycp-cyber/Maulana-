@@ -2,41 +2,40 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Tracker Pro Max</title>
+<title>Live Share Location</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
 
 <style>
 body{margin:0;font-family:Arial;text-align:center;}
-#map{height:65vh;}
-input,button{padding:10px;margin:5px;}
+#map{height:75vh;}
+button,input{padding:10px;margin:5px;}
 </style>
 </head>
 
 <body>
 
-<h2>🌐 Tracker Pro Max</h2>
-
-<input id="email" placeholder="Email">
-<input id="pass" type="password" placeholder="Password">
-<button onclick="register()">REGISTER</button>
-<button onclick="login()">LOGIN</button>
+<h2>📍 Share Lokasi Real-Time</h2>
 
 <div id="map"></div>
 
-<button onclick="sos()">🚨 SOS</button>
+<button onclick="start()">START</button>
+<button onclick="stop()">STOP</button>
 
-<p id="status"></p>
+<br>
+<input id="link" placeholder="Link share muncul di sini" style="width:80%">
+
+<p id="status">Belum aktif</p>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
+<!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js"></script>
 
 <script>
 
-// 🔥 GANTI DENGAN CONFIG FIREBASE KAMU
+// 🔥 CONFIG FIREBASE (ISI SENDIRI)
 const firebaseConfig = {
   apiKey: "ISI",
   authDomain: "ISI",
@@ -44,151 +43,71 @@ const firebaseConfig = {
 };
 
 firebase.initializeApp(firebaseConfig);
-
-const auth = firebase.auth();
 const db = firebase.database();
 
-let userId="";
-let map=L.map('map').setView([-6.2,106.8],13);
-let markers={};
-let lines={};
+// ambil ID unik dari URL
+let id = location.hash.replace("#","");
+
+if(!id){
+    id = Math.random().toString(36).substr(2,9);
+    location.hash = id;
+}
+
+// tampilkan link
+document.getElementById("link").value = location.href;
+
+let map = L.map('map').setView([-6.2,106.8],13);
+let marker;
+let watchId;
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-// 🔐 REGISTER
-function register(){
-let email=emailEl.value;
-let pass=passEl.value;
+// START TRACKING
+function start(){
+watchId = navigator.geolocation.watchPosition(pos=>{
 
-auth.createUserWithEmailAndPassword(email,pass)
-.then(()=>status("Register berhasil"))
-.catch(e=>alert(e.message));
-}
+let lat = pos.coords.latitude;
+let lng = pos.coords.longitude;
 
-// 🔐 LOGIN
-function login(){
-let email=emailEl.value;
-let pass=passEl.value;
+// kirim ke database
+db.ref("share/"+id).set({lat,lng});
 
-auth.signInWithEmailAndPassword(email,pass)
-.then(user=>{
-userId=user.user.uid;
-status("Login berhasil");
-startTracking();
-})
-.catch(e=>alert(e.message));
-}
+// tampilkan di map sendiri
+updateMarker(lat,lng);
 
-// 📍 AUTO TRACKING
-function startTracking(){
-navigator.geolocation.watchPosition(pos=>{
-
-let lat=pos.coords.latitude;
-let lng=pos.coords.longitude;
-
-cekZona(lat,lng);
-
-db.ref("users/"+userId).set({
-lat,lng,
-sos:false,
-lastUpdate:Date.now()
+}, err=>{
+alert("Izin lokasi ditolak!");
 });
-
-db.ref("history/"+userId).push({lat,lng});
-
-},{enableHighAccuracy:true});
 }
 
-// 🚧 GEOFENCE
-const home={lat:-6.2,lng:106.8,radius:0.01};
-
-function cekZona(lat,lng){
-let jarak=Math.sqrt(
-Math.pow(lat-home.lat,2)+Math.pow(lng-home.lng,2)
-);
-
-if(jarak>home.radius){
-kirimNotif("⚠️ Keluar zona!");
-}
+// STOP
+function stop(){
+navigator.geolocation.clearWatch(watchId);
 }
 
-// 🚨 SOS
-function sos(){
-db.ref("users/"+userId+"/sos").set(true);
-kirimNotif("🚨 SOS terkirim!");
-}
-
-// 🔔 NOTIF
-Notification.requestPermission();
-
-function kirimNotif(pesan){
-if(Notification.permission==="granted"){
-new Notification(pesan);
-}
-}
-
-// 👥 UPDATE USER REALTIME
-db.ref("users").on("value",snap=>{
-let data=snap.val();
-
-for(let u in data){
-let d=data[u];
-
-if(markers[u]){
-markers[u].setLatLng([d.lat,d.lng]);
+// UPDATE MARKER
+function updateMarker(lat,lng){
+if(marker){
+marker.setLatLng([lat,lng]);
 }else{
-markers[u]=L.marker([d.lat,d.lng]).addTo(map);
+marker = L.marker([lat,lng]).addTo(map);
+}
+map.setView([lat,lng],16);
 }
 
-// notif SOS
-if(d.sos){
-kirimNotif("🚨 Ada user SOS!");
-}
-}
-});
+// LIHAT DATA (buat orang lain)
+db.ref("share/"+id).on("value",snap=>{
+let data = snap.val();
 
-// 🧭 HISTORY
-db.ref("history").on("value",snap=>{
-let data=snap.val();
+if(data){
+updateMarker(data.lat,data.lng);
 
-for(let u in data){
-let coords=[];
-
-for(let k in data[u]){
-coords.push([data[u][k].lat,data[u][k].lng]);
-}
-
-if(lines[u]){
-lines[u].setLatLngs(coords);
-}else{
-lines[u]=L.polyline(coords).addTo(map);
-}
+document.getElementById("status").innerText =
+"📍 "+data.lat+" , "+data.lng;
 }
 });
-
-// 🟢 ONLINE/OFFLINE
-setInterval(()=>{
-db.ref("users").once("value",snap=>{
-let data=snap.val();
-
-for(let u in data){
-let last=data[u].lastUpdate;
-
-if(Date.now()-last>10000){
-console.log(u+" OFFLINE");
-}
-}
-});
-},5000);
-
-// UI helper
-const emailEl=document.getElementById("email");
-const passEl=document.getElementById("pass");
-
-function status(t){
-document.getElementById("status").innerText=t;
-}
 
 </script>
+
 </body>
 </html>
