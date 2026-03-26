@@ -1,178 +1,194 @@
 
-<html lang="id">
+<html>
 <head>
 <meta charset="UTF-8">
-<title>Slot Real Grid</title>
+<title>Tracker Pro Max</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
 
 <style>
-body{
-background:#0b3d2e;
-text-align:center;
-font-family:Arial;
-color:white;
-}
-
-#game{
-background:#2ecc71;
-padding:15px;
-border-radius:15px;
-display:inline-block;
-}
-
-.grid{
-display:grid;
-grid-template-columns: repeat(5, 60px);
-grid-gap:5px;
-margin-bottom:10px;
-}
-
-.tile{
-width:60px;
-height:70px;
-background:white;
-border-radius:10px;
-font-size:22px;
-display:flex;
-align-items:center;
-justify-content:center;
-color:black;
-}
-
-.wild{background:gold;}
-.scatter{background:purple;color:white;}
-
-.drop{
-animation:drop 0.3s ease;
-}
-
-@keyframes drop{
-from{transform:translateY(-80px);}
-to{transform:translateY(0);}
-}
-
-#win{
-background:red;
-padding:10px;
-border-radius:10px;
-margin-top:10px;
-font-weight:bold;
-}
-
-#spinBtn{
-position:relative;
-margin-top:10px;
-width:70px;
-height:70px;
-border-radius:50%;
-background:gold;
-border:none;
-font-size:18px;
-}
-
+body{margin:0;font-family:Arial;text-align:center;}
+#map{height:65vh;}
+input,button{padding:10px;margin:5px;}
 </style>
 </head>
 
 <body>
 
-<h2>🎰 SLOT REAL GRID</h2>
+<h2>🌐 Tracker Pro Max</h2>
 
-<div id="game">
-<div id="grid" class="grid"></div>
+<input id="email" placeholder="Email">
+<input id="pass" type="password" placeholder="Password">
+<button onclick="register()">REGISTER</button>
+<button onclick="login()">LOGIN</button>
 
-<div id="win">MENANG 0</div>
+<div id="map"></div>
 
-<button id="spinBtn" onclick="spin()">SPIN</button>
-</div>
+<button onclick="sos()">🚨 SOS</button>
 
-<p>💰 Saldo: <span id="coin">100</span></p>
+<p id="status"></p>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js"></script>
 
 <script>
 
-const simbol=["一","二","三","四","五","六"];
-const wild="WILD";
-const scatter="SCATTER";
+// 🔥 GANTI DENGAN CONFIG FIREBASE KAMU
+const firebaseConfig = {
+  apiKey: "ISI",
+  authDomain: "ISI",
+  databaseURL: "ISI"
+};
 
-let coin=100;
+firebase.initializeApp(firebaseConfig);
 
-function init(){
-let grid=document.getElementById("grid");
-grid.innerHTML="";
+const auth = firebase.auth();
+const db = firebase.database();
 
-for(let i=0;i<15;i++){
-let d=document.createElement("div");
-d.className="tile";
-d.id="t"+i;
-d.innerText="❓";
-grid.appendChild(d);
+let userId="";
+let map=L.map('map').setView([-6.2,106.8],13);
+let markers={};
+let lines={};
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+// 🔐 REGISTER
+function register(){
+let email=emailEl.value;
+let pass=passEl.value;
+
+auth.createUserWithEmailAndPassword(email,pass)
+.then(()=>status("Register berhasil"))
+.catch(e=>alert(e.message));
+}
+
+// 🔐 LOGIN
+function login(){
+let email=emailEl.value;
+let pass=passEl.value;
+
+auth.signInWithEmailAndPassword(email,pass)
+.then(user=>{
+userId=user.user.uid;
+status("Login berhasil");
+startTracking();
+})
+.catch(e=>alert(e.message));
+}
+
+// 📍 AUTO TRACKING
+function startTracking(){
+navigator.geolocation.watchPosition(pos=>{
+
+let lat=pos.coords.latitude;
+let lng=pos.coords.longitude;
+
+cekZona(lat,lng);
+
+db.ref("users/"+userId).set({
+lat,lng,
+sos:false,
+lastUpdate:Date.now()
+});
+
+db.ref("history/"+userId).push({lat,lng});
+
+},{enableHighAccuracy:true});
+}
+
+// 🚧 GEOFENCE
+const home={lat:-6.2,lng:106.8,radius:0.01};
+
+function cekZona(lat,lng){
+let jarak=Math.sqrt(
+Math.pow(lat-home.lat,2)+Math.pow(lng-home.lng,2)
+);
+
+if(jarak>home.radius){
+kirimNotif("⚠️ Keluar zona!");
 }
 }
 
-function rand(){
-let r=Math.random();
-if(r<0.1)return wild;
-if(r<0.2)return scatter;
-return simbol[Math.floor(Math.random()*simbol.length)];
+// 🚨 SOS
+function sos(){
+db.ref("users/"+userId+"/sos").set(true);
+kirimNotif("🚨 SOS terkirim!");
 }
 
-function spin(){
+// 🔔 NOTIF
+Notification.requestPermission();
 
-if(coin<=0){
-alert("Saldo habis!");
-return;
-}
-
-coin-=5;
-
-let hasil=[];
-let win=0;
-
-for(let col=0;col<5;col++){
-
-for(let row=0;row<3;row++){
-
-let i = col + row*5;
-
-setTimeout(()=>{
-let s=rand();
-hasil[i]=s;
-
-let el=document.getElementById("t"+i);
-el.className="tile drop";
-
-if(s===wild){
-el.classList.add("wild");
-el.innerText="🃏";
-}
-else if(s===scatter){
-el.classList.add("scatter");
-el.innerText="🎁";
-}
-else{
-el.innerText=s;
-}
-
-}, col*200); // delay per kolom
+function kirimNotif(pesan){
+if(Notification.permission==="granted"){
+new Notification(pesan);
 }
 }
 
-// cek menang simple
-setTimeout(()=>{
+// 👥 UPDATE USER REALTIME
+db.ref("users").on("value",snap=>{
+let data=snap.val();
 
-if(hasil[0]===hasil[1] && hasil[1]===hasil[2]){
-win=30;
+for(let u in data){
+let d=data[u];
+
+if(markers[u]){
+markers[u].setLatLng([d.lat,d.lng]);
+}else{
+markers[u]=L.marker([d.lat,d.lng]).addTo(map);
 }
 
-coin+=win;
+// notif SOS
+if(d.sos){
+kirimNotif("🚨 Ada user SOS!");
+}
+}
+});
 
-document.getElementById("coin").innerText=coin;
-document.getElementById("win").innerText="MENANG "+win;
+// 🧭 HISTORY
+db.ref("history").on("value",snap=>{
+let data=snap.val();
 
-},1200);
+for(let u in data){
+let coords=[];
+
+for(let k in data[u]){
+coords.push([data[u][k].lat,data[u][k].lng]);
 }
 
-init();
+if(lines[u]){
+lines[u].setLatLngs(coords);
+}else{
+lines[u]=L.polyline(coords).addTo(map);
+}
+}
+});
+
+// 🟢 ONLINE/OFFLINE
+setInterval(()=>{
+db.ref("users").once("value",snap=>{
+let data=snap.val();
+
+for(let u in data){
+let last=data[u].lastUpdate;
+
+if(Date.now()-last>10000){
+console.log(u+" OFFLINE");
+}
+}
+});
+},5000);
+
+// UI helper
+const emailEl=document.getElementById("email");
+const passEl=document.getElementById("pass");
+
+function status(t){
+document.getElementById("status").innerText=t;
+}
 
 </script>
-
 </body>
 </html>
